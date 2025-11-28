@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route, Link } from "react-router-dom";
-import JigglyLogo from "./assets/jiggly_logo1.svg";
+import JigglyLogo from "./assets/Jiggly_logo1.svg";
 import QrisImage from "./assets/qris-jiggly.jpg";
 
 /* =======================
