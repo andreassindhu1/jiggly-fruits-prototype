@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route, Link } from "react-router-dom";
 import JigglyLogo from "./assets/Jiggly_logo1.svg";
 import QrisImage from "./assets/qris-jiggly.jpg";
+import { supabase } from "./lib/supabaseClient";
+
 
 /* =======================
    DATA BUAH & TOPPING
@@ -1042,7 +1044,7 @@ export default function App() {
     });
   };
 
-  const handleSubmit = (e) => {
+   const handleSubmit = (e) => {
     e.preventDefault();
     const rec = getRecommendations(form);
     setResult(rec);
@@ -1070,27 +1072,61 @@ export default function App() {
     setShowPayment(false);
   };
 
-  const handleShowPayment = () => {
-    setShowPayment(true);
-    if (!result) return;
+  // ⬇️ DI SINI kita ubah: handleShowPayment jadi async + kirim ke Supabase
+ const handleShowPayment = async () => {
+  if (!result) {
+    console.warn("handleShowPayment dipanggil tapi result masih null");
+    return;
+  }
 
-    const newOrder = {
-      id: Date.now(),
-      code: `JF-${Date.now().toString().slice(-4)}`,
-      name: form.name || "Customer",
-      goal: form.goal,
-      portion: form.portion,
-      price: result.price,
-      fruits: result.fruits.map((f) => f.name),
-      createdAt: new Date().toLocaleTimeString("id-ID", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-      status: "new",
-    };
+  setShowPayment(true);
 
-    setOrders((prev) => [newOrder, ...prev]);
+  const newOrder = {
+    id: Date.now(),
+    code: `JF-${Date.now().toString().slice(-4)}`,
+    name: form.name || "Customer",
+    goal: form.goal,
+    portion: form.portion,
+    price: result.price,
+    fruits: result.fruits.map((f) => f.name),
+    createdAt: new Date().toLocaleTimeString("id-ID", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    status: "new",
   };
+
+  // tetap simpan ke state lokal
+  setOrders((prev) => [newOrder, ...prev]);
+
+  // === kirim ke Supabase ===
+  try {
+    const { data, error } = await supabase
+      .from("orders")
+      .insert([
+        {
+          customer_name: newOrder.name,
+          phone: form.phone || "",          // kalau form-mu ada field phone
+          salad_type: result.name || "",    // atau pakai form.goal kalau mau
+          size: newOrder.portion || "",
+          toppings: newOrder.fruits.join(", "),
+          price: newOrder.price || 0,
+          status: newOrder.status,          // "new"
+        },
+      ])
+      .select();
+
+    if (error) {
+      console.error("Supabase insert error:", error);
+      alert("Supabase insert error: " + error.message);
+    } else {
+      console.log("Supabase insert success:", data);
+    }
+  } catch (err) {
+    console.error("Unexpected Supabase error:", err);
+    alert("Unexpected Supabase error, cek console.");
+  }
+};
 
   const updateOrderStatus = (id, status) => {
     setOrders((prev) =>
@@ -1099,6 +1135,7 @@ export default function App() {
       )
     );
   };
+
 
   /* ===== ROUTER ===== */
 
