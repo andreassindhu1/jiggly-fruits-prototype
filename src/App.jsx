@@ -263,6 +263,36 @@ function Header({ isAdmin }) {
 }
 
 /* =======================
+   FOOTER WA & IG ("/")
+======================= */
+
+function Footer() {
+  const whatsappNumber = "6287779164996"; // TANPA + dan TANPA 0 di depan
+  const instagramHandle = "jiggly.fruitz";
+
+  const whatsappUrl = `https://wa.me/${whatsappNumber}`;
+  const instagramUrl = `https://instagram.com/${instagramHandle}`;
+
+  return (
+    <footer className="footer">
+      <div className="footer-left">
+        © 2025 Jiggly Fruitz. All rights reserved.
+      </div>
+      <div className="footer-right">
+        <span>Contact us:&nbsp;</span>
+        <a href={whatsappUrl} target="_blank" rel="noreferrer">
+          WhatsApp
+        </a>
+        <span>&nbsp;•&nbsp;</span>
+        <a href={instagramUrl} target="_blank" rel="noreferrer">
+          Instagram
+        </a>
+      </div>
+    </footer>
+  );
+}
+
+/* =======================
    CUSTOMER PAGE ("/")
 ======================= */
 
@@ -287,6 +317,8 @@ function CustomerPage({
   handleGoToForm,
   handleEdit,
   handleShowPayment,
+  isSavingOrder,
+  saveError,
 }) {
   return (
     <div className="app-shell">
@@ -760,7 +792,8 @@ function CustomerPage({
                     </div>
                     <div className="hint-text">
                       *Harga berdasarkan ukuran kemasan, bukan kombinasi buah /
-                      topping. Estimasi kalori masih kasar dan bisa disesuaikan.
+                      topping. Estimasi kalori masih kasar dan bisa
+                      disesuaikan.
                     </div>
                   </div>
                 </div>
@@ -776,6 +809,7 @@ function CustomerPage({
                     type="button"
                     className="btn-secondary"
                     onClick={handleEdit}
+                    disabled={isSavingOrder}
                   >
                     Ubah Data
                   </button>
@@ -783,8 +817,9 @@ function CustomerPage({
                     type="button"
                     className="btn-secondary btn-secondary-strong"
                     onClick={handleShowPayment}
+                    disabled={isSavingOrder}
                   >
-                    Lanjut Pembayaran
+                    {isSavingOrder ? "Menyimpan pesanan..." : "Lanjut Pembayaran"}
                   </button>
                 </div>
 
@@ -796,6 +831,7 @@ function CustomerPage({
                     type="button"
                     className="link-button"
                     onClick={handleReset}
+                    disabled={isSavingOrder}
                   >
                     Reset &amp; buat pesanan baru
                   </button>
@@ -809,6 +845,10 @@ function CustomerPage({
                     Scan QRIS ini dengan aplikasi pembayaran favorit kamu untuk
                     menyelesaikan transaksi Jiggly Fruitz.
                   </p>
+                  <p className="qris-note">
+                    Setelah pembayaran berhasil, tunjukkan bukti transaksi ke
+                    tim Jiggly Fruitz di booth ya 🍉
+                  </p>
                   <div className="qris-placeholder">
                     <img
                       src={QrisImage}
@@ -816,6 +856,12 @@ function CustomerPage({
                       className="qris-image"
                     />
                   </div>
+                  {saveError && (
+                    <div className="qris-error">
+                      Gagal menyimpan pesanan ke sistem. Silakan coba lagi
+                      sebentar lagi.
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -844,6 +890,8 @@ function CustomerPage({
           )}
         </section>
       </main>
+
+      <Footer />
     </div>
   );
 }
@@ -897,14 +945,16 @@ function AdminPage({ orders, updateOrderStatus }) {
                         {order.portion === "300" ? "300 ml" : "500 ml"}
                       </span>
                       <span className="pill-simple time-pill">
-                        {order.createdAt}
+                        {order.created_at_time || order.createdAt}
                       </span>
                     </div>
                     <div className="admin-order-fruits">
                       Buah:{" "}
                       <span>
                         {order.fruits && order.fruits.length > 0
-                          ? order.fruits.join(", ")
+                          ? Array.isArray(order.fruits)
+                            ? order.fruits.join(", ")
+                            : order.fruits
                           : "-"}
                       </span>
                     </div>
@@ -957,8 +1007,9 @@ export default function App() {
   const [fruitLift, setFruitLift] = useState(0);
   const [fruitAlreadyLifted, setFruitAlreadyLifted] = useState(false);
 
-  // ✅ orders cuma dari Supabase
   const [orders, setOrders] = useState([]);
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const formSectionRef = useRef(null);
   const resultSectionRef = useRef(null);
@@ -966,61 +1017,7 @@ export default function App() {
   const bmi = calculateBMI(form.height, form.weight);
   const bmiCategory = getBMICategory(bmi);
 
-  /* Ambil data orders dari Supabase saat App pertama kali load */
-  useEffect(() => {
-    const fetchOrders = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("orders")
-          .select("*")
-          .order("created_at", { ascending: false });
-
-        if (error) {
-          console.error("Supabase fetch error:", error);
-          return;
-        }
-
-        const mapped = data.map((row) => {
-          const createdAtLabel = row.created_at
-            ? new Date(row.created_at).toLocaleTimeString("id-ID", {
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-            : "";
-
-          const goalFromRow =
-            row.goal ??
-            (row.salad_type &&
-            row.salad_type.toLowerCase().includes("diet")
-              ? "diet"
-              : "gain");
-
-          return {
-            id: row.id,
-            code: "JF-" + (row.id ? row.id.slice(-4).toUpperCase() : "XXXX"),
-            name: row.customer_name || "Customer",
-            goal: goalFromRow,
-            portion: row.size || "300",
-            price: row.price ?? 0,
-            fruits: (row.toppings || "")
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean),
-            createdAt: createdAtLabel,
-            status: row.status || "new",
-          };
-        });
-
-        setOrders(mapped);
-      } catch (err) {
-        console.error("Unexpected Supabase fetch error:", err);
-      }
-    };
-
-    fetchOrders();
-  }, []);
-
-  // 1) Hero fade mengikuti scroll
+  // HERO fade
   useEffect(() => {
     const handleScrollHero = () => {
       const y = window.scrollY;
@@ -1035,7 +1032,7 @@ export default function App() {
     return () => window.removeEventListener("scroll", handleScrollHero);
   }, []);
 
-  // 2) Buah naik sekali waktu user lewat hero
+  // FRUIT once lifted
   useEffect(() => {
     if (fruitAlreadyLifted) return;
 
@@ -1055,7 +1052,48 @@ export default function App() {
     return () => window.removeEventListener("scroll", handleScrollFruit);
   }, [fruitAlreadyLifted]);
 
-  /* ===== HANDLERS FORM & LOGIC ===== */
+  // LOAD orders from Supabase (global, tanpa localStorage)
+  useEffect(() => {
+    async function fetchOrders() {
+      const { data, error } = await supabase
+        .from("orders")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error("Supabase fetch error:", error);
+        return;
+      }
+
+      const mapped = data.map((row) => ({
+        id: row.id,
+        code: row.code || row.id,
+        name: row.customer_name || "Customer",
+        goal: row.goal || row.salad_type === "diet" ? "diet" : "gain",
+        portion: row.size === "500" ? "500" : "300",
+        price: row.price || 0,
+        fruits: row.fruits
+          ? Array.isArray(row.fruits)
+            ? row.fruits
+            : row.fruits.split(",").map((s) => s.trim())
+          : [],
+        createdAt: row.created_at,
+        status: row.status || "new",
+        created_at_time: row.created_at
+          ? new Date(row.created_at).toLocaleTimeString("id-ID", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "",
+      }));
+
+      setOrders(mapped);
+    }
+
+    fetchOrders();
+  }, []);
+
+  /* ===== handlers form & logic ===== */
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -1089,6 +1127,7 @@ export default function App() {
     setResult(rec);
     setAiText(generateAiText(form, rec));
     setShowPayment(false);
+    setSaveError("");
   };
 
   const handleReset = () => {
@@ -1096,6 +1135,7 @@ export default function App() {
     setResult(null);
     setAiText("");
     setShowPayment(false);
+    setSaveError("");
   };
 
   const handleGoToForm = () => {
@@ -1111,91 +1151,95 @@ export default function App() {
     setShowPayment(false);
   };
 
-  // Supabase-only: simpan pesanan ke Supabase lalu ke state
+  // handleShowPayment dengan loading state + error manis
   const handleShowPayment = async () => {
-    if (!result) {
-      console.warn("handleShowPayment dipanggil tapi result masih null");
+    if (!result || isSavingOrder) {
       return;
     }
 
     setShowPayment(true);
+    setIsSavingOrder(true);
+    setSaveError("");
+
+    const newOrder = {
+      id: Date.now(),
+      code: `JF-${Date.now().toString().slice(-4)}`,
+      name: form.name || "Customer",
+      goal: form.goal,
+      portion: form.portion,
+      price: result.price,
+      fruits: result.fruits.map((f) => f.name),
+      createdAt: new Date().toLocaleTimeString("id-ID", {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      status: "new",
+    };
 
     try {
       const { data, error } = await supabase
         .from("orders")
         .insert([
           {
-            customer_name: form.name || "Customer",
-            salad_type: form.goal === "diet" ? "Diet" : "Weight Gain",
-            size: form.portion,
-            toppings: result.fruits.map((f) => f.name).join(", "),
-            price: result.price,
-            status: "new",
+            customer_name: newOrder.name,
+            salad_type: newOrder.goal,
+            size: newOrder.portion,
+            toppings: newOrder.fruits.join(", "),
+            price: newOrder.price || 0,
+            status: newOrder.status,
           },
         ])
-        .select();
+        .select()
+        .single();
 
       if (error) {
         console.error("Supabase insert error:", error);
-        alert("Supabase insert error: " + error.message);
-        return;
+        setSaveError("Supabase insert error");
+      } else {
+        // prepend ke state orders supaya admin langsung lihat
+        setOrders((prev) => [
+          {
+            id: data.id,
+            code: data.code || newOrder.code,
+            name: data.customer_name || newOrder.name,
+            goal: data.goal || data.salad_type || newOrder.goal,
+            portion: data.size === "500" ? "500" : "300",
+            price: data.price || newOrder.price,
+            fruits: newOrder.fruits,
+            status: data.status || newOrder.status,
+            createdAt: data.created_at,
+            created_at_time: data.created_at
+              ? new Date(data.created_at).toLocaleTimeString("id-ID", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })
+              : newOrder.createdAt,
+          },
+          ...prev,
+        ]);
       }
-
-      const row = data[0];
-
-      const createdAtLabel = row.created_at
-        ? new Date(row.created_at).toLocaleTimeString("id-ID", {
-            hour: "2-digit",
-            minute: "2-digit",
-          })
-        : "";
-
-      const newOrder = {
-        id: row.id,
-        code: "JF-" + (row.id ? row.id.slice(-4).toUpperCase() : "XXXX"),
-        name: row.customer_name || "Customer",
-        goal: form.goal,
-        portion: row.size || form.portion,
-        price: row.price ?? result.price,
-        fruits: (row.toppings || "")
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
-        createdAt: createdAtLabel,
-        status: row.status || "new",
-      };
-
-      setOrders((prev) => [newOrder, ...prev]);
     } catch (err) {
       console.error("Unexpected Supabase error:", err);
-      alert("Unexpected Supabase error, cek console.");
+      setSaveError("Unexpected Supabase error");
+    } finally {
+      setIsSavingOrder(false);
     }
   };
 
-  // Update status juga ke Supabase
-  const updateOrderStatus = async (id, status) => {
+  const updateOrderStatus = async (orderId, newStatus) => {
     setOrders((prev) =>
-      prev.map((order) =>
-        order.id === id ? { ...order, status } : order
-      )
+      prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o))
     );
 
-    try {
-      const { error } = await supabase
-        .from("orders")
-        .update({ status })
-        .eq("id", id);
+    const { error } = await supabase
+      .from("orders")
+      .update({ status: newStatus })
+      .eq("id", orderId);
 
-      if (error) {
-        console.error("Supabase update error:", error);
-        alert("Gagal mengupdate status di database: " + error.message);
-      }
-    } catch (err) {
-      console.error("Unexpected Supabase update error:", err);
+    if (error) {
+      console.error("Supabase update error:", error);
     }
   };
-
-  /* ===== ROUTER ===== */
 
   return (
     <Router>
@@ -1224,6 +1268,8 @@ export default function App() {
               handleGoToForm={handleGoToForm}
               handleEdit={handleEdit}
               handleShowPayment={handleShowPayment}
+              isSavingOrder={isSavingOrder}
+              saveError={saveError}
             />
           }
         />
