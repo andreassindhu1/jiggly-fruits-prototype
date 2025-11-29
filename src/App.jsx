@@ -4,7 +4,6 @@ import JigglyLogo from "./assets/Jiggly_logo1.svg";
 import QrisImage from "./assets/qris-jiggly.jpg";
 import { supabase } from "./lib/supabaseClient";
 
-
 /* =======================
    DATA BUAH & TOPPING
 ======================= */
@@ -225,7 +224,7 @@ const initialFormState = {
 };
 
 /* =======================
-   HEADER (DIPAKAI DI 2 HALAMAN)
+   HEADER
 ======================= */
 
 function Header({ isAdmin }) {
@@ -256,7 +255,7 @@ function Header({ isAdmin }) {
           </Link>
         )}
         <span className="badge badge-soft">
-          {isAdmin ? "Admin Mode" : "Prototype • Localhost"}
+          {isAdmin ? "Admin Mode" : "Prototype • Supabase"}
         </span>
       </div>
     </header>
@@ -761,8 +760,7 @@ function CustomerPage({
                     </div>
                     <div className="hint-text">
                       *Harga berdasarkan ukuran kemasan, bukan kombinasi buah /
-                      topping. Estimasi kalori masih kasar dan bisa
-                      disesuaikan.
+                      topping. Estimasi kalori masih kasar dan bisa disesuaikan.
                     </div>
                   </div>
                 </div>
@@ -959,21 +957,68 @@ export default function App() {
   const [fruitLift, setFruitLift] = useState(0);
   const [fruitAlreadyLifted, setFruitAlreadyLifted] = useState(false);
 
-  const [orders, setOrders] = useState(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const stored = localStorage.getItem("jiggly_orders");
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  });
+  // ✅ orders cuma dari Supabase
+  const [orders, setOrders] = useState([]);
 
   const formSectionRef = useRef(null);
   const resultSectionRef = useRef(null);
 
   const bmi = calculateBMI(form.height, form.weight);
   const bmiCategory = getBMICategory(bmi);
+
+  /* Ambil data orders dari Supabase saat App pertama kali load */
+  useEffect(() => {
+    const fetchOrders = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("orders")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        if (error) {
+          console.error("Supabase fetch error:", error);
+          return;
+        }
+
+        const mapped = data.map((row) => {
+          const createdAtLabel = row.created_at
+            ? new Date(row.created_at).toLocaleTimeString("id-ID", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "";
+
+          const goalFromRow =
+            row.goal ??
+            (row.salad_type &&
+            row.salad_type.toLowerCase().includes("diet")
+              ? "diet"
+              : "gain");
+
+          return {
+            id: row.id,
+            code: "JF-" + (row.id ? row.id.slice(-4).toUpperCase() : "XXXX"),
+            name: row.customer_name || "Customer",
+            goal: goalFromRow,
+            portion: row.size || "300",
+            price: row.price ?? 0,
+            fruits: (row.toppings || "")
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            createdAt: createdAtLabel,
+            status: row.status || "new",
+          };
+        });
+
+        setOrders(mapped);
+      } catch (err) {
+        console.error("Unexpected Supabase fetch error:", err);
+      }
+    };
+
+    fetchOrders();
+  }, []);
 
   // 1) Hero fade mengikuti scroll
   useEffect(() => {
@@ -990,33 +1035,27 @@ export default function App() {
     return () => window.removeEventListener("scroll", handleScrollHero);
   }, []);
 
-  // 2) Buah: sekali naik ketika user lewat hero, lalu tidak pernah diubah lagi
+  // 2) Buah naik sekali waktu user lewat hero
   useEffect(() => {
     if (fruitAlreadyLifted) return;
 
     const handleScrollFruit = () => {
       const y = window.scrollY;
-      const threshold = 260; // jarak scroll sebelum buah "dilempar" ke atas
+      const threshold = 260;
 
       if (y > threshold) {
-        setFruitLift(1);            // 0 -> 1 (CSS yang bikin transisi halus)
+        setFruitLift(1);
         setFruitAlreadyLifted(true);
       }
     };
 
     window.addEventListener("scroll", handleScrollFruit);
-    handleScrollFruit(); // kalau reload di posisi bawah
+    handleScrollFruit();
 
     return () => window.removeEventListener("scroll", handleScrollFruit);
   }, [fruitAlreadyLifted]);
 
-  // SIMPAN ORDERS DI LOCALSTORAGE
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    localStorage.setItem("jiggly_orders", JSON.stringify(orders));
-  }, [orders]);
-
-  /* ===== handlers form & logic ===== */
+  /* ===== HANDLERS FORM & LOGIC ===== */
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -1044,7 +1083,7 @@ export default function App() {
     });
   };
 
-   const handleSubmit = (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
     const rec = getRecommendations(form);
     setResult(rec);
@@ -1072,70 +1111,89 @@ export default function App() {
     setShowPayment(false);
   };
 
-  // ⬇️ DI SINI kita ubah: handleShowPayment jadi async + kirim ke Supabase
- const handleShowPayment = async () => {
-  if (!result) {
-    console.warn("handleShowPayment dipanggil tapi result masih null");
-    return;
-  }
+  // Supabase-only: simpan pesanan ke Supabase lalu ke state
+  const handleShowPayment = async () => {
+    if (!result) {
+      console.warn("handleShowPayment dipanggil tapi result masih null");
+      return;
+    }
 
-  setShowPayment(true);
+    setShowPayment(true);
 
-  const newOrder = {
-    id: Date.now(),
-    code: `JF-${Date.now().toString().slice(-4)}`,
-    name: form.name || "Customer",
-    goal: form.goal,
-    portion: form.portion,
-    price: result.price,
-    fruits: result.fruits.map((f) => f.name),
-    createdAt: new Date().toLocaleTimeString("id-ID", {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
-    status: "new",
+    try {
+      const { data, error } = await supabase
+        .from("orders")
+        .insert([
+          {
+            customer_name: form.name || "Customer",
+            salad_type: form.goal === "diet" ? "Diet" : "Weight Gain",
+            size: form.portion,
+            toppings: result.fruits.map((f) => f.name).join(", "),
+            price: result.price,
+            status: "new",
+          },
+        ])
+        .select();
+
+      if (error) {
+        console.error("Supabase insert error:", error);
+        alert("Supabase insert error: " + error.message);
+        return;
+      }
+
+      const row = data[0];
+
+      const createdAtLabel = row.created_at
+        ? new Date(row.created_at).toLocaleTimeString("id-ID", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : "";
+
+      const newOrder = {
+        id: row.id,
+        code: "JF-" + (row.id ? row.id.slice(-4).toUpperCase() : "XXXX"),
+        name: row.customer_name || "Customer",
+        goal: form.goal,
+        portion: row.size || form.portion,
+        price: row.price ?? result.price,
+        fruits: (row.toppings || "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        createdAt: createdAtLabel,
+        status: row.status || "new",
+      };
+
+      setOrders((prev) => [newOrder, ...prev]);
+    } catch (err) {
+      console.error("Unexpected Supabase error:", err);
+      alert("Unexpected Supabase error, cek console.");
+    }
   };
 
-  // tetap simpan ke state lokal
-  setOrders((prev) => [newOrder, ...prev]);
-
-  // === kirim ke Supabase ===
-  try {
-    const { data, error } = await supabase
-      .from("orders")
-      .insert([
-        {
-          customer_name: newOrder.name,
-          phone: form.phone || "",          // kalau form-mu ada field phone
-          salad_type: result.name || "",    // atau pakai form.goal kalau mau
-          size: newOrder.portion || "",
-          toppings: newOrder.fruits.join(", "),
-          price: newOrder.price || 0,
-          status: newOrder.status,          // "new"
-        },
-      ])
-      .select();
-
-    if (error) {
-      console.error("Supabase insert error:", error);
-      alert("Supabase insert error: " + error.message);
-    } else {
-      console.log("Supabase insert success:", data);
-    }
-  } catch (err) {
-    console.error("Unexpected Supabase error:", err);
-    alert("Unexpected Supabase error, cek console.");
-  }
-};
-
-  const updateOrderStatus = (id, status) => {
+  // Update status juga ke Supabase
+  const updateOrderStatus = async (id, status) => {
     setOrders((prev) =>
       prev.map((order) =>
         order.id === id ? { ...order, status } : order
       )
     );
-  };
 
+    try {
+      const { error } = await supabase
+        .from("orders")
+        .update({ status })
+        .eq("id", id);
+
+      if (error) {
+        console.error("Supabase update error:", error);
+        alert("Gagal mengupdate status di database: " + error.message);
+      }
+    } catch (err) {
+      console.error("Unexpected Supabase update error:", err);
+    }
+  };
 
   /* ===== ROUTER ===== */
 
