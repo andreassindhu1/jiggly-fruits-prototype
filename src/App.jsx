@@ -87,7 +87,6 @@ function formatRupiah(num) {
   if (num == null) return "-";
   return "Rp " + num.toLocaleString("id-ID");
 }
-
 /* =======================
    LOGIKA REKOMENDASI
 ======================= */
@@ -95,6 +94,7 @@ function formatRupiah(num) {
 function getRecommendations(form) {
   let candidates;
 
+  // Filter awal berdasarkan goal (diet / gain)
   if (form.goal === "diet") {
     candidates = FRUITS.filter(
       (f) =>
@@ -104,32 +104,64 @@ function getRecommendations(form) {
     );
   } else {
     candidates = FRUITS.filter(
-      (f) => f.forGain || f.calories >= 80 || f.sugar === "high"
+      (f) => f.forGain || f.sugar === "high"
     );
   }
 
+  // Filter tingkat kemanisan
   if (form.sweetness === "low") {
     candidates = candidates.filter((f) => f.sugar === "low");
   } else if (form.sweetness === "high") {
     candidates = candidates.filter((f) => f.sugar !== "low");
   }
 
-  if (form.likedFruits.length > 0) {
-    candidates = candidates.filter((f) => form.likedFruits.includes(f.id));
-  }
-
-  if (form.dislikedFruits.length > 0) {
-    candidates = candidates.filter(
-      (f) => !form.dislikedFruits.includes(f.id)
-    );
-  }
-
+  // Kalau semua kepotong, fallback ke FRUITS supaya tetap ada kombinasi
   if (candidates.length === 0) {
-    candidates = FRUITS.filter(
-      (f) => !form.dislikedFruits.includes(f.id)
-    );
+    candidates = FRUITS.slice();
   }
 
+  // Tentukan maksimal jumlah buah per porsi
+  const maxFruit =
+    form.portion === "500"
+      ? Math.min(4, candidates.length)
+      : Math.min(3, candidates.length);
+
+  let selectedFruits = [];
+
+  if (form.likedFruits.length > 0) {
+    // Buah yang disukai dan lolos filter
+    const primary = candidates.filter((f) =>
+      form.likedFruits.includes(f.id)
+    );
+
+    // Buah lain yang masih cocok tapi tidak dipilih langsung
+    const secondary = candidates.filter(
+      (f) => !form.likedFruits.includes(f.id)
+    );
+
+    const picked = [...primary];
+
+    // Isi kombinasi dengan buah lain sampai mencapai maxFruit
+    for (const f of secondary) {
+      if (picked.length >= maxFruit) break;
+      picked.push(f);
+    }
+
+    // Kalau ternyata primary kosong (misalnya buah favorit nggak lolos filter),
+    // pakai candidates biasa supaya tetap ada isi
+    selectedFruits =
+      picked.length > 0 ? picked.slice(0, maxFruit) : candidates.slice(0, maxFruit);
+  } else {
+    // User tidak pilih buah favorit -> ambil top N dari candidates
+    selectedFruits = candidates.slice(0, maxFruit);
+  }
+
+  // Fallback terakhir kalau entah kenapa masih kosong
+  if (selectedFruits.length === 0) {
+    selectedFruits = FRUITS.slice(0, maxFruit || 3);
+  }
+
+  // Topping tetap, tapi tidak akan muncul di AI text (hanya di kartu rekomendasi)
   let toppings;
   if (form.goal === "diet") {
     toppings = TOPPINGS.filter(
@@ -138,13 +170,6 @@ function getRecommendations(form) {
   } else {
     toppings = TOPPINGS;
   }
-
-  const maxFruit =
-    form.portion === "500"
-      ? Math.min(4, candidates.length)
-      : Math.min(3, candidates.length);
-
-  const selectedFruits = candidates.slice(0, maxFruit);
 
   const portionFactor = form.portion === "500" ? 1.6 : 1;
   const totalCalories = Math.round(
@@ -160,7 +185,6 @@ function getRecommendations(form) {
     price,
   };
 }
-
 /* =======================
    "AI" CAPTION LOKAL
 ======================= */
@@ -181,11 +205,6 @@ function generateAiText(form, result) {
       ? result.fruits.map((f) => `- ${f.name}`).join("\n")
       : "- (belum ada buah terpilih)";
 
-  const toppingList =
-    result.toppings && result.toppings.length > 0
-      ? result.toppings.map((t) => `- ${t.name}`).join("\n")
-      : "- Tanpa topping khusus";
-
   return (
     `Halo ${name}! 🧃
 
@@ -195,11 +214,8 @@ Berdasarkan jawaban kamu, kami sarankan salad dengan karakter:
 • Perkiraan kalori sekitar ${result.totalCalories} kkal
 • Harga ${priceText}
 
-Kombinasi buah pilihan:
+Rekomendasi kombinasi buah:
 ${buahList}
-
-Topping yang cocok:
-${toppingList}
 
 Salad ini cocok dinikmati saat belajar, nugas, atau santai bareng teman.
 Kalau sudah oke, tinggal konfirmasi ke tim Jiggly Fruitz di booth ya! ✨`
@@ -218,7 +234,6 @@ const initialFormState = {
   weight: "",
   goal: "diet",
   likedFruits: [],
-  dislikedFruits: [],
   sweetness: "medium",
   portion: "300",
 };
@@ -604,47 +619,21 @@ function CustomerPage({
 
             <h3 className="section-title">Preferensi Buah</h3>
 
-            <div className="section-subgrid">
-              <div>
-                <div className="section-subtitle">Buah favorit</div>
-                <div className="chip-grid">
-                  {FRUITS.map((f) => (
-                    <button
-                      type="button"
-                      key={f.id}
-                      className={`chip ${
-                        form.likedFruits.includes(f.id) ? "chip-active" : ""
-                      }`}
-                      onClick={() =>
-                        handleFruitCheckbox("likedFruits", f.id)
-                      }
-                    >
-                      {f.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <div className="section-subtitle">Buah yang tidak disukai</div>
-                <div className="chip-grid">
-                  {FRUITS.map((f) => (
-                    <button
-                      type="button"
-                      key={f.id}
-                      className={`chip chip-outline ${
-                        form.dislikedFruits.includes(f.id)
-                          ? "chip-active-outline"
-                          : ""
-                      }`}
-                      onClick={() =>
-                        handleFruitCheckbox("dislikedFruits", f.id)
-                      }
-                    >
-                      {f.name}
-                    </button>
-                  ))}
-                </div>
+            <div>
+              <div className="section-subtitle">Buah favorit</div>
+              <div className="chip-grid">
+                {FRUITS.map((f) => (
+                  <button
+                    type="button"
+                    key={f.id}
+                    className={`chip ${
+                      form.likedFruits.includes(f.id) ? "chip-active" : ""
+                    }`}
+                    onClick={() => handleFruitCheckbox("likedFruits", f.id)}
+                  >
+                    {f.name}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -819,7 +808,9 @@ function CustomerPage({
                     onClick={handleShowPayment}
                     disabled={isSavingOrder}
                   >
-                    {isSavingOrder ? "Menyimpan pesanan..." : "Lanjut Pembayaran"}
+                    {isSavingOrder
+                      ? "Menyimpan pesanan..."
+                      : "Lanjut Pembayaran"}
                   </button>
                 </div>
 
@@ -1069,7 +1060,8 @@ export default function App() {
         id: row.id,
         code: row.code || row.id,
         name: row.customer_name || "Customer",
-        goal: row.goal || row.salad_type === "diet" ? "diet" : "gain",
+        goal:
+          row.goal || (row.salad_type === "diet" ? "diet" : "gain"),
         portion: row.size === "500" ? "500" : "300",
         price: row.price || 0,
         fruits: row.fruits
